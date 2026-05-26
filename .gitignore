@@ -1,7 +1,9 @@
 data/
 log/
 models/__pycache__/
+utils/__pycache__/
 *.pyc
 *.pth
 *.tar.gz
 .DS_Store
+/.vscode

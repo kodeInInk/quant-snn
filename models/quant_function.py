@@ -40,10 +40,10 @@ class ReScaWConv(nn.Module):
         
         #STE int4 weight quantasation
         w_scaled = real_weights / scale
-        w_int = torch.clamp(w_scaled * w_max, w_min, w_max)
+        w_int = torch.clamp(w_scaled * w_max, w_min, w_max)#Bengio 2013, Hinton lectures, Jacob et al. 2018
         w_quant = torch.round(w_int).detach() - w_int.detach() + w_int
          #STE int8 bias quantasation(same per channel)
-        b_int = torch.clamp(self.bias / scale.view(self.out_channels) * w_max, b_min, b_max)
+        b_int = torch.clamp(self.bias / scale.view(self.out_channels) * w_max, b_min, b_max) #Bengio 2013, Hinton lectures, Jacob et al. 2018
         b_quant = torch.round(b_int).detach() - b_int.detach() + b_int
         
         #scaling outside (IP: WEIGHT_ACC + MP_BIAS_ACC)

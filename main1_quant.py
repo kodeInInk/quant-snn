@@ -1,10 +1,11 @@
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #usinf python 10 and requirements.txt for non conflicts
-#ean python main1_quant.py --dataset CIFAR10 --job_dir ./log/quant/cifar10/vgg16-4bit --epochs 5 --workers 0
+#a)run python main1_quant.py --dataset CIFAR10 --job_dir ./log/quant/cifar10/vgg16-4bit --epochs 5 --workers 0
+#b) run: python main0_fp.py --dataset CIFAR10 --job_dir ./log/fp/cifar10/vgg16 --workers 0
 
 import torch
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 import time, datetime
 import argparse
@@ -20,7 +21,7 @@ from utils import common
 from utils.functions import split_weights,TET_loss
 # from thop import profile, clever_format
 
-from models.quant_vgg import vgg_16_bn
+from models.fp_vgg import vgg_16_bn #will be using 70% ish fp for pretrainign
 from models.quant_resnet_cifar import resnet_20
 
 
@@ -33,6 +34,11 @@ parser.add_argument(
     help='architecture')
 
 parser.add_argument(
+    '--fp',
+    action='store_true',
+    help='train full precision model (stage 1)')
+
+parser.add_argument(
     '-bit',
     default=4,
     type=int,
@@ -42,7 +48,8 @@ parser.add_argument(
 parser.add_argument(
     '--job_dir',
     type=str,
-    default='./log/quant/cifar100/vgg16-4bit',
+    # default='./log/quant/cifar100/vgg16-4bit',
+    default='./log/fp/cifar10/vgg16',
     help='path for saving trained models')
 
 parser.add_argument(
@@ -54,7 +61,7 @@ parser.add_argument(
 parser.add_argument(
     '--epochs',
     type=int,
-    default=300,
+    default=50,
     help='num of training epochs')
 
 parser.add_argument(
@@ -69,6 +76,12 @@ parser.add_argument(
     help='whether continue training from the same directory')
 
 parser.add_argument(
+    '--pretrained',
+    type=str,
+    default=None,
+    help='path to FP pretrained checkpoint for QAT')
+
+parser.add_argument(
     '--gpu',
     type=str,
     default='0',
@@ -80,6 +93,16 @@ parser.add_argument(
     type=str,
     help='dataset name',
     choices=['CIFAR10', 'CIFAR100', 'ImageNet', 'TinyImageNet'])
+
+parser.add_argument(
+    '--fp', 
+    action='store_true', 
+    help='train full precision model (stage 1)')
+parser.add_argument(
+    '--pretrained', 
+    type=str, 
+    default=None, 
+    help='path to fp pretrained checkpoint (stage 2)')
 
 parser.add_argument(
     '-j',
@@ -209,7 +232,11 @@ def main():
     # load model
     logger.info('==> Building model..')
     logger.info('=== Bit width===:'+str(args.bit))
-    model = eval(args.arch)(compress_rate=[0.]*100,num_bits=args.bit,num_classes=CLASSES)
+    if args.fp:
+        from models.fp_vgg import vgg_16_bn as fp_vgg_16_bn
+        model = fp_vgg_16_bn(compress_rate=[0.]*100, num_classes=CLASSES, num_bits=args.bit)
+    else:
+        model = eval(args.arch)(compress_rate=[0.]*100, num_bits=args.bit, num_classes=CLASSES)
     model.to(device)
     logger.info(model)
 
@@ -274,7 +301,22 @@ def main():
         for epoch in range(start_epoch):
             scheduler.step()
     else:
+        if args.pretrained:
+            checkpoint = torch.load(args.pretrained, map_location=device)
+            model.load_state_dict(checkpoint['state_dict'], strict=False)
+            logger.info('loaded FP pretrained weights from {}'.format(args.pretrained))
+        if args.pretrained is not None:
+            logger.info('loading pretrained fp model: {}'.format(args.pretrained))
+            checkpoint = torch.load(args.pretrained, map_location=device)
+            tmp_ckpt = checkpoint['state_dict']
+            new_state_dict = OrderedDict()
+            for k, v in tmp_ckpt.items():
+                new_state_dict[k.replace('module.', '')] = v
+            model.load_state_dict(new_state_dict, strict=False)
+            logger.info('pretrained fp model loaded')
+        
         logger.info('training from scratch')
+        
 
     # train the model
     epoch = start_epoch
